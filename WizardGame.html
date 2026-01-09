@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Impel's Magecraft | Tactical Spellcaster</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+        
+        body {
+            background-color: #050508;
+            color: #e2e8f0;
+            font-family: 'VT323', monospace;
+            overflow: hidden;
+            margin: 0;
+            user-select: none;
+            image-rendering: pixelated;
+        }
+
+        #ui-layer {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 30px;
+            z-index: 10;
+        }
+
+        .pixel-border {
+            background: #15151e;
+            border: 4px solid #3d3d4d;
+            box-shadow: inset -4px -4px 0 #000, inset 4px 4px 0 #5d5d6d;
+        }
+
+        .hotkey-label {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #3d3d4d;
+            padding: 2px 8px;
+            font-size: 16px;
+            color: #fff;
+            border: 2px solid #000;
+        }
+
+        .cd-fill {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.2);
+            transition: height 0.1s linear;
+        }
+
+        #menu-overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, #1a1a2e 0%, #050508 100%);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .scroll-wrapper {
+            position: relative;
+            width: 95vw;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .scroll-container {
+            display: flex;
+            overflow-x: auto;
+            gap: 20px;
+            padding: 40px;
+            width: 80vw;
+            scrollbar-width: none;
+            scroll-behavior: smooth;
+        }
+        .scroll-container::-webkit-scrollbar { display: none; }
+
+        .nav-btn {
+            background: #1e1e2e;
+            border: 4px solid #3d3d4d;
+            color: white;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 2rem;
+            transition: all 0.2s;
+            z-index: 110;
+        }
+        .nav-btn:hover { background: #3d3d4d; color: #fbbf24; }
+
+        .element-group {
+            flex: 0 0 auto;
+            width: 280px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .spell-card {
+            width: 100%;
+            height: 65px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 0 15px;
+            transition: all 0.2s;
+            background: #1a1a24;
+            border: 2px solid #3d3d4d;
+        }
+        .spell-card:hover { transform: translateX(10px); background: #2a2a34; }
+        .spell-card.selected { border-color: #fbbf24; background: #3d3d4d; box-shadow: 0 0 15px #fbbf2444; }
+
+        .hp-unit {
+            width: 30px;
+            height: 12px;
+            background: #ef4444;
+            border: 2px solid #000;
+        }
+        .hp-unit.empty { background: #334155; opacity: 0.3; }
+
+        canvas { display: block; }
+    </style>
+</head>
+<body onload="init()">
+
+<div id="ui-layer">
+    <div class="flex justify-between items-start">
+        <div class="flex flex-col gap-1">
+            <span class="text-2xl text-slate-500 uppercase tracking-tighter">Vitality</span>
+            <div id="hp-container" class="flex gap-1"></div>
+        </div>
+        <div class="text-center">
+            <div id="wave-display" class="text-6xl text-white italic">RITE 01</div>
+            <div id="action-msg" class="text-2xl text-purple-400 uppercase tracking-[0.2em] opacity-0 transition-opacity duration-1000">ESSENCE RESTORED</div>
+        </div>
+        <div class="text-right">
+            <span class="text-2xl text-slate-500 uppercase tracking-tighter">Essence</span>
+            <div id="score-display" class="text-6xl text-white">000000</div>
+        </div>
+    </div>
+    <div id="hotbar" class="flex justify-center gap-6 pb-6 pointer-events-auto"></div>
+</div>
+
+<div id="menu-overlay">
+    <h1 class="text-7xl text-white italic tracking-tighter mb-2">SURVIVE THE RITES</h1>
+    <p class="text-xl text-slate-400 mb-4 uppercase tracking-[0.5em]">Select 4 Spells to Begin</p>
+
+    <div class="scroll-wrapper">
+        <button class="nav-btn" onclick="scrollSpells(-300)">◀</button>
+        <div class="scroll-container" id="spell-scroll"></div>
+        <button class="nav-btn" onclick="scrollSpells(300)">▶</button>
+    </div>
+
+    <div class="flex flex-col items-center gap-4 mt-6">
+        <div id="current-selection" class="flex gap-4 h-20 items-center"></div>
+        <button id="start-btn" disabled onclick="startGame()" class="pixel-border px-16 py-4 text-3xl text-slate-500 uppercase opacity-50">
+            Awaken
+        </button>
+    </div>
+</div>
+
+<div id="game-over" class="hidden absolute inset-0 bg-black/90 z-[200] flex flex-col items-center justify-center">
+    <h2 class="text-9xl text-red-600 italic mb-10">Vanquished</h2>
+    <button onclick="location.reload()" class="pixel-border px-12 py-4 text-3xl text-white hover:bg-slate-700">RETRY</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const SPELLS = {
+        FIRE: [
+            { id: 'f1', icon: '🔥', name: 'Ignis Bolt', shape: 'projectile', style: 'diamond', cd: 300, dmg: 15, color: '#ff4d00', speed: 12 },
+            { id: 'f2', icon: '☄️', name: 'Meteor', shape: 'aoe', style: 'meteor', cd: 2500, dmg: 120, color: '#ff8800', size: 100 },
+            { id: 'f3', icon: '💥', name: 'Fire Nova', shape: 'aura', style: 'expand-ring', cd: 4000, dmg: 60, color: '#ff2200', size: 180 },
+            { id: 'f4', icon: '🔥', name: 'Inferno', shape: 'beam', style: 'laser', cd: 5000, dmg: 2, color: '#f97316', duration: 120 }
+        ],
+        WATER: [
+            { id: 'w1', icon: '💧', name: 'Aqua Dart', shape: 'projectile', style: 'needle', cd: 400, dmg: 25, color: '#00d4ff', speed: 16 },
+            { id: 'w2', icon: '❄️', name: 'Frost Pulse', shape: 'aura', style: 'ripple', cd: 3500, dmg: 10, color: '#a0f0ff', size: 150, effect: 'freeze' },
+            { id: 'w3', icon: '🌊', name: 'Tide', shape: 'wave', style: 'arc', cd: 4000, dmg: 80, color: '#0088ff', speed: 8 },
+            { id: 'w4', icon: '🧊', name: 'Ice Blade', shape: 'projectile', style: 'spinning-star', cd: 1500, dmg: 50, color: '#ffffff', speed: 10 }
+        ],
+        EARTH: [
+            { id: 'e1', icon: '🪨', name: 'Boulder', shape: 'projectile', style: 'heavy-square', cd: 1200, dmg: 90, color: '#a16207', speed: 5 },
+            { id: 'e2', icon: '🌵', name: 'Earth Spikes', shape: 'trap', style: 'spikes', cd: 4000, dmg: 65, color: '#4d7c0f', size: 60 },
+            { id: 'e3', icon: '🛡️', name: 'Granite Skin', shape: 'buff', style: 'shield', cd: 10000, color: '#78350f', duration: 300 },
+            { id: 'e4', icon: '🌋', name: 'Seismic', shape: 'aura', style: 'cracks', cd: 8000, dmg: 150, color: '#451a03', size: 250 }
+        ],
+        WIND: [
+            { id: 'wi1', icon: '🌬️', name: 'Razor Air', shape: 'projectile', style: 'blade-arc', cd: 200, dmg: 18, color: '#10b981', speed: 20 },
+            { id: 'wi2', icon: '🌪️', name: 'Vortex', shape: 'field', style: 'swirl', cd: 6000, dmg: 5, color: '#d1fae5', size: 120, effect: 'pull' },
+            { id: 'wi3', icon: '💨', name: 'Gust Dash', shape: 'utility', style: 'dash', cd: 1250, color: '#6ee7b7' },
+            { id: 'wi4', icon: '🎐', name: 'Whirlwind', shape: 'orbit', style: 'balls', cd: 7000, dmg: 20, color: '#a7f3d0', count: 3 }
+        ],
+        THUNDER: [
+            { id: 't1', icon: '⚡', name: 'Spark', shape: 'projectile', style: 'bolt', cd: 600, dmg: 50, color: '#eab308', speed: 22 },
+            { id: 't2', icon: '🌩️', name: 'Tesla Coil', shape: 'static', style: 'arcs', cd: 5000, dmg: 80, color: '#fef08a', size: 80 },
+            { id: 't3', icon: '✨', name: 'Storm Ring', shape: 'aura', style: 'jagged-ring', cd: 6000, dmg: 30, color: '#fbbf24', size: 200 },
+            { id: 't4', icon: '🔱', name: 'Divine Bolt', shape: 'aoe', style: 'pillar', cd: 12000, dmg: 300, color: '#facc15', size: 100 }
+        ],
+        VOID: [
+            { id: 'v1', icon: '🌑', name: 'Singularity', shape: 'projectile', style: 'black-hole', cd: 3000, dmg: 100, color: '#8b5cf6', speed: 3 },
+            { id: 'v2', icon: '🌀', name: 'Shadow Web', shape: 'field', style: 'web', cd: 7000, dmg: 2, color: '#4c1d95', effect: 'slow', size: 160, duration: 300 },
+            { id: 'v3', icon: '🖐️', name: 'Repulse', shape: 'aura', style: 'push-pulse', cd: 4000, dmg: 20, color: '#a78bfa', size: 120, effect: 'push' },
+            { id: 'v4', icon: '⚛️', name: 'Dark Matter', shape: 'aoe', style: 'burst', cd: 9000, dmg: 180, color: '#ddd6fe', size: 100 }
+        ]
+    };
+
+    let state = {
+        active: false,
+        score: 0,
+        wave: 0,
+        selectedSpells: [],
+        player: { x: 0, y: 0, hp: 10, maxHp: 10, speed: 4, invuln: 0, armor: 0, buff: null, buffLife: 0, radius: 20 },
+        enemies: [],
+        projectiles: [],
+        enemyProjectiles: [],
+        particles: [],
+        keys: {},
+        mouse: { x: 0, y: 0 },
+        cooldowns: {},
+        shake: 0,
+        padding: 40 
+    };
+
+    function init() {
+        resize();
+        window.addEventListener('resize', resize);
+        window.addEventListener('keydown', e => state.keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', e => state.keys[e.key.toLowerCase()] = false);
+        window.addEventListener('mousemove', e => { state.mouse.x = e.clientX; state.mouse.y = e.clientY; });
+        renderSpellbook();
+        state.player.x = canvas.width / 2;
+        state.player.y = canvas.height / 2;
+    }
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+
+    function scrollSpells(amount) {
+        document.getElementById('spell-scroll').scrollBy({ left: amount, behavior: 'smooth' });
+    }
+
+    function renderSpellbook() {
+        const scroll = document.getElementById('spell-scroll');
+        scroll.innerHTML = '';
+        Object.entries(SPELLS).forEach(([element, spells]) => {
+            const group = document.createElement('div');
+            group.className = 'element-group';
+            group.innerHTML = `<h3 class="text-2xl text-slate-500 uppercase italic mb-2 tracking-widest">${element}</h3>`;
+            spells.forEach(s => {
+                const card = document.createElement('div');
+                card.id = `card-${s.id}`;
+                card.className = `spell-card pixel-border ${state.selectedSpells.find(p => p.id === s.id) ? 'selected' : ''}`;
+                card.innerHTML = `<span class="text-3xl">${s.icon}</span><span class="text-xl text-white uppercase">${s.name}</span>`;
+                card.onclick = () => toggleSpell(s);
+                group.appendChild(card);
+            });
+            scroll.appendChild(group);
+        });
+    }
+
+    function toggleSpell(s) {
+        const idx = state.selectedSpells.findIndex(p => p.id === s.id);
+        if (idx > -1) state.selectedSpells.splice(idx, 1);
+        else if (state.selectedSpells.length < 4) state.selectedSpells.push(s);
+        
+        Object.values(SPELLS).flat().forEach(spell => {
+            const card = document.getElementById(`card-${spell.id}`);
+            if (state.selectedSpells.find(p => p.id === spell.id)) card.classList.add('selected');
+            else card.classList.remove('selected');
+        });
+        updateSelectionUI();
+    }
+
+    function updateSelectionUI() {
+        const container = document.getElementById('current-selection');
+        container.innerHTML = '';
+        state.selectedSpells.forEach(s => {
+            container.innerHTML += `<div class="w-16 h-16 pixel-border flex items-center justify-center text-3xl" style="border-color:${s.color}">${s.icon}</div>`;
+        });
+        const btn = document.getElementById('start-btn');
+        btn.disabled = state.selectedSpells.length !== 4;
+        btn.className = `pixel-border px-16 py-4 text-3xl uppercase ${btn.disabled ? 'text-slate-500 opacity-50' : 'text-white hover:bg-slate-700'}`;
+    }
+
+    function startGame() {
+        document.getElementById('menu-overlay').style.display = 'none';
+        state.active = true;
+        renderHotbar();
+        updateHPUI();
+        spawnWave();
+        requestAnimationFrame(loop);
+    }
+
+    function renderHotbar() {
+        const bar = document.getElementById('hotbar');
+        bar.innerHTML = '';
+        const keys = ['Z', 'X', 'C', 'V'];
+        state.selectedSpells.forEach((s, i) => {
+            bar.innerHTML += `
+                <div class="pixel-border w-24 h-24 relative flex flex-col items-center justify-center bg-slate-900/80" style="border-color: ${s.color}">
+                    <div class="hotkey-label">${keys[i]}</div>
+                    <div id="cd-${keys[i]}" class="cd-fill" style="background: ${s.color}66"></div>
+                    <span class="text-3xl z-10">${s.icon}</span>
+                </div>
+            `;
+        });
+    }
+
+    function clamp(val, min, max) {
+        return Math.max(min, Math.min(max, val));
+    }
+
+    function spawnWave() {
+        state.wave++;
+        document.getElementById('wave-display').innerText = `RITE ${state.wave.toString().padStart(2, '0')}`;
+        
+        const count = 1 + (state.wave * 3); 
+        for(let i=0; i<count; i++) {
+            const x = state.padding + Math.random() * (canvas.width - state.padding * 2);
+            const y = state.padding + Math.random() * (canvas.height - state.padding * 2);
+            
+            if (Math.hypot(x - state.player.x, y - state.player.y) < 200) { i--; continue; }
+
+            const type = (state.wave > 2 && Math.random() > 0.7) ? 'ranged' : 'melee';
+
+            state.enemies.push({
+                x, y,
+                hp: 40 + (state.wave * 15),
+                maxHp: 40 + (state.wave * 15),
+                speed: type === 'melee' ? (1.5 + (state.wave * 0.08)) : (1.0 + (state.wave * 0.04)),
+                type: type,
+                fireCd: 150 + Math.random() * 100,
+                hitTime: 0,
+                frozen: 0,
+                slowed: 0,
+                healer: false,
+                radius: 20
+            });
+        }
+
+        const sX = state.padding + Math.random() * (canvas.width - state.padding * 2);
+        const sY = state.padding + Math.random() * (canvas.height - state.padding * 2);
+        state.enemies.push({
+            x: sX, y: sY,
+            hp: 20, maxHp: 20,
+            speed: 3.5,
+            type: 'healer',
+            fireCd: 0, hitTime: 0,
+            frozen: 0, slowed: 0,
+            healer: true,
+            radius: 25
+        });
+    }
+
+    function createParticles(x, y, color, count = 5) {
+        for(let i=0; i<count; i++) {
+            state.particles.push({
+                x, y,
+                vx: (Math.random()-0.5)*10,
+                vy: (Math.random()-0.5)*10,
+                life: 30 + Math.random()*20,
+                color
+            });
+        }
+    }
+
+    function cast(idx) {
+        const s = state.selectedSpells[idx];
+        const k = ['z', 'x', 'c', 'v'][idx];
+        if (!state.active || (state.cooldowns[k] || 0) > Date.now()) return;
+
+        state.cooldowns[k] = Date.now() + s.cd;
+        const mouseAngle = Math.atan2(state.mouse.y - state.player.y, state.mouse.x - state.player.x);
+        
+        // --- ONLY Shadow Web (v2) spawns at player position ---
+        const spawnX = (s.id === 'v2') ? state.player.x : state.mouse.x;
+        const spawnY = (s.id === 'v2') ? state.player.y : state.mouse.y;
+
+        const pBase = { 
+            ...s, 
+            x: spawnX, 
+            y: spawnY, 
+            life: s.duration || 60, angle: mouseAngle, scale: 0.1, 
+            vx: 0, 
+            vy: 0 
+        };
+
+        if (s.shape === 'projectile' || s.shape === 'wave') {
+            pBase.x = state.player.x;
+            pBase.y = state.player.y;
+            pBase.vx = Math.cos(mouseAngle) * (s.speed || 0);
+            pBase.vy = Math.sin(mouseAngle) * (s.speed || 0);
+        } else if (s.shape === 'aura') {
+            pBase.x = state.player.x;
+            pBase.y = state.player.y;
+        } else if (s.shape === 'buff' && s.style === 'shield') {
+            state.player.buff = 'granite';
+            state.player.buffLife = s.duration;
+            createParticles(state.player.x, state.player.y, s.color, 10);
+            return;
+        } else if (s.shape === 'utility' && s.style === 'dash') {
+            let dx = 0, dy = 0;
+            if (state.keys['arrowup'] || state.keys['w']) dy -= 1;
+            if (state.keys['arrowdown'] || state.keys['s']) dy += 1;
+            if (state.keys['arrowleft'] || state.keys['a']) dx -= 1;
+            if (state.keys['arrowright'] || state.keys['d']) dx += 1;
+            let dashAngle = mouseAngle;
+            if (dx !== 0 || dy !== 0) dashAngle = Math.atan2(dy, dx);
+            state.player.x = clamp(state.player.x + Math.cos(dashAngle) * 300, state.padding, canvas.width - state.padding);
+            state.player.y = clamp(state.player.y + Math.sin(dashAngle) * 300, state.padding, canvas.height - state.padding);
+            state.player.invuln = 20;
+            createParticles(state.player.x, state.player.y, s.color, 15);
+            return;
+        } else if (s.shape === 'beam' || s.shape === 'orbit') {
+            pBase.x = state.player.x;
+            pBase.y = state.player.y;
+            pBase.life = s.duration || 120;
+        }
+
+        state.projectiles.push(pBase);
+        if (s.dmg > 50) state.shake = 8;
+    }
+
+    function update() {
+        if (state.shake > 0) state.shake *= 0.9;
+
+        let mx = 0, my = 0;
+        if (state.keys['arrowup'] || state.keys['w']) my -= state.player.speed;
+        if (state.keys['arrowdown'] || state.keys['s']) my += state.player.speed;
+        if (state.keys['arrowleft'] || state.keys['a']) mx -= state.player.speed;
+        if (state.keys['arrowright'] || state.keys['d']) mx += state.player.speed;
+        
+        if (mx !== 0 && my !== 0) { mx *= 0.7071; my *= 0.7071; }
+        
+        state.player.x = clamp(state.player.x + mx, state.padding, canvas.width - state.padding);
+        state.player.y = clamp(state.player.y + my, state.padding, canvas.height - state.padding);
+        
+        state.player.invuln = Math.max(0, state.player.invuln - 1);
+        if (state.player.buffLife > 0) {
+            state.player.buffLife--;
+            if (state.player.buffLife <= 0) state.player.buff = null;
+        }
+
+        if (state.keys['z']) cast(0);
+        if (state.keys['x']) cast(1);
+        if (state.keys['c']) cast(2);
+        if (state.keys['v']) cast(3);
+
+        state.enemyProjectiles.forEach(p => {
+            p.x += p.vx; p.y += p.vy; p.life--;
+            if (Math.hypot(p.x - state.player.x, p.y - state.player.y) < 25 && state.player.invuln <= 0) {
+                state.player.hp--; state.player.invuln = 40; state.shake = 10; p.life = 0;
+                updateHPUI(); if (state.player.hp <= 0) gameOver();
+            }
+        });
+        state.enemyProjectiles = state.enemyProjectiles.filter(p => p.life > 0);
+
+        state.projectiles.forEach(p => {
+            p.x += p.vx; p.y += p.vy;
+            if (p.shape === 'beam' || p.shape === 'orbit' || p.shape === 'aura') { p.x = state.player.x; p.y = state.player.y; }
+            p.life--;
+            
+            if (p.shape === 'aura' || p.shape === 'aoe' || p.style === 'burst' || p.style === 'meteor') {
+                p.scale = Math.min(1, p.scale + 0.1);
+            } else {
+                p.scale = 1;
+            }
+
+            state.enemies.forEach(en => {
+                let hit = false;
+                if (p.shape === 'beam') {
+                    const dx = en.x - p.x, dy = en.y - p.y;
+                    const distEn = Math.hypot(dx, dy);
+                    const angleEn = Math.atan2(dy, dx);
+                    let diff = angleEn - p.angle;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    if (Math.abs(diff) < 0.1 && distEn < 1000) hit = true;
+                } else if (p.shape === 'orbit') {
+                   const time = Date.now() / 200;
+                   for(let i=0; i<3; i++) {
+                       const ang = time + (i * Math.PI * 2 / 3);
+                       const ox = p.x + Math.cos(ang) * 80, oy = p.y + Math.sin(ang) * 80;
+                       if (Math.hypot(ox - en.x, oy - en.y) < 30) hit = true;
+                   }
+                } else {
+                    const dist = Math.hypot(p.x - en.x, p.y - en.y);
+                    const hitRadius = p.size ? (p.size * p.scale) : 30;
+                    if (dist < hitRadius) hit = true;
+                }
+
+                if (hit) {
+                    if (p.dmg) { 
+                        en.hp -= (p.shape === 'field' || p.shape === 'static' ? p.dmg / 10 : p.dmg); 
+                        en.hitTime = 5; 
+                    }
+                    if (p.effect === 'freeze') en.frozen = 60;
+                    if (p.effect === 'slow') en.slowed = 60;
+                    if (p.effect === 'pull') {
+                        const pullAng = Math.atan2(p.y - en.y, p.x - en.x);
+                        en.x += Math.cos(pullAng) * 2; en.y += Math.sin(pullAng) * 2;
+                    }
+                    if (p.shape === 'projectile' && p.style !== 'needle') p.life = 0;
+                }
+            });
+        });
+
+        const standardEnemiesExist = state.enemies.some(e => !e.healer);
+
+        state.enemies.forEach((en, idx) => {
+            if (en.healer && !standardEnemiesExist) { createParticles(en.x, en.y, '#a855f7', 10); en.hp = -1; return; }
+            en.hitTime = Math.max(0, en.hitTime - 1);
+            if (en.frozen > 0) { en.frozen--; return; }
+
+            let sepX = 0, sepY = 0;
+            state.enemies.forEach((other, oIdx) => {
+                if (idx === oIdx) return;
+                const d = Math.hypot(en.x - other.x, en.y - other.y);
+                if (d < 50) { sepX += (en.x - other.x) / d; sepY += (en.y - other.y) / d; }
+            });
+
+            const spd = en.slowed > 0 ? en.speed * 0.3 : en.speed;
+            en.slowed = Math.max(0, en.slowed - 1);
+
+            const distToPlayer = Math.hypot(state.player.x - en.x, state.player.y - en.y);
+            const angleToPlayer = Math.atan2(state.player.y - en.y, state.player.x - en.x);
+
+            if (en.healer) { en.x -= Math.cos(angleToPlayer) * spd; en.y -= Math.sin(angleToPlayer) * spd; }
+            else if (en.type === 'ranged') {
+                if (distToPlayer > 400) { en.x += Math.cos(angleToPlayer) * spd + sepX * 0.5; en.y += Math.sin(angleToPlayer) * spd + sepY * 0.5; }
+                else if (distToPlayer < 300) { en.x -= Math.cos(angleToPlayer) * spd - sepX * 0.5; en.y -= Math.sin(angleToPlayer) * spd - sepY * 0.5; }
+                else { en.x += sepX * 0.5; en.y += sepY * 0.5; }
+                en.fireCd--;
+                if (en.fireCd <= 0) {
+                    en.fireCd = 180 - (state.wave * 2);
+                    state.enemyProjectiles.push({ x: en.x, y: en.y, vx: Math.cos(angleToPlayer) * 5, vy: Math.sin(angleToPlayer) * 5, life: 200, color: '#f43f5e' });
+                }
+            } else { en.x += Math.cos(angleToPlayer) * spd + sepX * 0.5; en.y += Math.sin(angleToPlayer) * spd + sepY * 0.5; }
+
+            en.x = clamp(en.x, state.padding, canvas.width - state.padding);
+            en.y = clamp(en.y, state.padding, canvas.height - state.padding);
+
+            if (distToPlayer < 30 && state.player.invuln <= 0 && !en.healer) {
+                if (state.player.buff !== 'granite') { state.player.hp--; state.player.invuln = 60; state.shake = 15; updateHPUI(); }
+                else { en.hp -= 10; state.player.invuln = 20; }
+                if (state.player.hp <= 0) gameOver();
+            }
+        });
+
+        state.enemies.forEach(en => { if (en.healer && en.hp <= 0 && en.hp !== -1) { state.player.hp = state.player.maxHp; updateHPUI(); createParticles(en.x, en.y, '#f472b6', 20); showActionMsg('ESSENCE RESTORED'); } });
+        state.particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.life--; });
+        state.particles = state.particles.filter(p => p.life > 0);
+        state.enemies = state.enemies.filter(e => e.hp > 0);
+        state.projectiles = state.projectiles.filter(p => p.life > 0);
+
+        if (state.active && state.enemies.length === 0) { state.score += state.wave * 1000; document.getElementById('score-display').innerText = state.score.toString().padStart(6, '0'); spawnWave(); }
+        const hKeys = ['z', 'x', 'c', 'v'];
+        state.selectedSpells.forEach((s, i) => { const k = hKeys[i]; const rem = Math.max(0, (state.cooldowns[k] || 0) - Date.now()); document.getElementById(`cd-${k.toUpperCase()}`).style.height = (rem / s.cd * 100) + '%'; });
+    }
+
+    function showActionMsg(txt) { const m = document.getElementById('action-msg'); m.innerText = txt; m.style.opacity = '1'; setTimeout(() => m.style.opacity = '0', 2000); }
+
+    function drawSpell(p) {
+        ctx.save(); ctx.translate(p.x, p.y); ctx.fillStyle = p.color; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+        const s = p.style; const time = Date.now() / 100;
+        const currentRadius = (p.size || 30) * (p.scale || 1);
+
+        if (s === 'diamond') { ctx.rotate(p.angle); ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(0, 10); ctx.lineTo(-20, 0); ctx.lineTo(0, -10); ctx.fill(); }
+        else if (s === 'needle') { ctx.rotate(p.angle); ctx.fillRect(-20, -1, 40, 2); }
+        else if (s === 'expand-ring' || s === 'ripple') { ctx.globalAlpha = Math.min(1, p.life / 20); ctx.beginPath(); ctx.arc(0, 0, currentRadius, 0, Math.PI*2); ctx.strokeStyle = p.color; ctx.lineWidth = 5; ctx.stroke(); }
+        else if (s === 'spinning-star') { ctx.rotate(time); for(let i=0; i<4; i++) { ctx.rotate(Math.PI/2); ctx.fillRect(-15, -2, 30, 4); } }
+        else if (s === 'heavy-square') { ctx.rotate(time * 0.5); ctx.fillRect(-15, -15, 30, 30); ctx.strokeRect(-15, -15, 30, 30); }
+        else if (s === 'spikes') { for(let i=0; i<8; i++) { ctx.rotate(Math.PI/4); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(10, currentRadius/2); ctx.lineTo(-10, currentRadius/2); ctx.fill(); } }
+        else if (s === 'cracks') { ctx.strokeStyle = p.color; ctx.lineWidth = 4; for(let i=0; i<6; i++) { ctx.rotate(Math.PI/3); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0, currentRadius); ctx.stroke(); } }
+        else if (s === 'swirl' || s === 'web') { 
+            ctx.rotate(time); 
+            ctx.beginPath(); 
+            ctx.arc(0,0, currentRadius, 0, Math.PI*2); 
+            ctx.strokeStyle = p.color; 
+            ctx.stroke(); 
+            for(let i=0; i<8; i++) {
+                ctx.rotate(Math.PI/4);
+                ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(currentRadius, 0); ctx.stroke();
+            }
+        }
+        else if (s === 'bolt') { ctx.rotate(p.angle); ctx.beginPath(); ctx.moveTo(-20, 0); ctx.lineTo(0, 15); ctx.lineTo(0, -15); ctx.lineTo(20, 0); ctx.stroke(); }
+        else if (s === 'pillar') { ctx.globalAlpha = Math.min(0.6, p.life / 30); ctx.fillRect(-currentRadius, -canvas.height, currentRadius*2, canvas.height * 2); }
+        else if (s === 'black-hole') { ctx.beginPath(); ctx.arc(0,0, 25, 0, Math.PI*2); ctx.fillStyle = '#000'; ctx.fill(); ctx.strokeStyle = p.color; ctx.lineWidth = 4; ctx.stroke(); }
+        else if (s === 'laser') { ctx.rotate(p.angle); ctx.globalAlpha = Math.min(1, p.life / 30); ctx.fillRect(0, -10, 2000, 20); ctx.fillStyle = '#fff'; ctx.fillRect(0, -3, 2000, 6); }
+        else if (s === 'blade-arc') { ctx.rotate(p.angle); ctx.beginPath(); ctx.arc(0, 0, 30, -1, 1); ctx.strokeStyle = p.color; ctx.lineWidth = 3; ctx.stroke(); }
+        else if (s === 'balls') { for(let i=0; i<3; i++) { const ang = time + (i * Math.PI * 2 / 3); ctx.beginPath(); ctx.arc(Math.cos(ang)*80, Math.sin(ang)*80, 10, 0, Math.PI*2); ctx.fill(); ctx.stroke(); } }
+        else if (s === 'meteor') { 
+            const drop = Math.max(0, (p.life - 30) * 15); 
+            ctx.translate(0, -drop); 
+            ctx.beginPath(); ctx.arc(0, 0, currentRadius, 0, Math.PI*2); ctx.fill(); 
+        }
+        else if (s === 'arc') { ctx.rotate(p.angle); ctx.beginPath(); ctx.arc(0,0, 100, -1, 1); ctx.strokeStyle = p.color; ctx.lineWidth = 15; ctx.stroke(); }
+        else if (s === 'arcs') { ctx.strokeStyle = p.color; for(let i=0; i<8; i++) { ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo((Math.random()-0.5)*currentRadius*2, (Math.random()-0.5)*currentRadius*2); ctx.stroke(); } }
+        else if (s === 'jagged-ring') { ctx.beginPath(); for(let i=0; i<Math.PI*2; i+=0.2) { const r = currentRadius + (Math.random()*15); ctx.lineTo(Math.cos(i)*r, Math.sin(i)*r); } ctx.closePath(); ctx.stroke(); }
+        else if (s === 'burst') { ctx.globalAlpha = Math.min(1, p.life / 30); ctx.beginPath(); ctx.arc(0,0, currentRadius, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.stroke(); }
+        ctx.restore();
+    }
+
+    function draw() {
+        ctx.save(); 
+        if (state.shake > 0.5) ctx.translate((Math.random()-0.5)*state.shake, (Math.random()-0.5)*state.shake);
+        
+        ctx.fillStyle = '#050508'; 
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1;
+        for(let x=0; x<canvas.width; x+=60) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x, canvas.height); ctx.stroke(); }
+        for(let y=0; y<canvas.height; y+=60) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
+        
+        ctx.strokeStyle = '#3d3d4d'; ctx.lineWidth = 8;
+        ctx.strokeRect(state.padding/2, state.padding/2, canvas.width - state.padding, canvas.height - state.padding);
+        
+        state.projectiles.forEach(drawSpell);
+        
+        state.enemyProjectiles.forEach(p => { 
+            ctx.fillStyle = p.color; 
+            ctx.beginPath(); 
+            ctx.arc(p.x, p.y, 6, 0, Math.PI*2); 
+            ctx.fill(); 
+            ctx.strokeStyle = '#fff'; 
+            ctx.lineWidth = 1; 
+            ctx.stroke(); 
+        });
+        
+        state.enemies.forEach(en => {
+            if (en.healer) { 
+                ctx.save(); ctx.translate(en.x, en.y); ctx.rotate(Date.now() / 400); ctx.fillStyle = '#a855f7'; 
+                ctx.beginPath(); for(let i=0; i<5; i++) { const a = i * Math.PI * 2 / 5; ctx.lineTo(Math.cos(a)*18, Math.sin(a)*18); } 
+                ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#f472b6'; ctx.lineWidth = 2; ctx.stroke(); 
+                ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(0,0, 30, 0, Math.PI*2); ctx.fill(); ctx.restore(); return; 
+            }
+            ctx.fillStyle = en.hitTime > 0 ? '#fff' : (en.frozen > 0 ? '#0ea5e9' : (en.type === 'ranged' ? '#4c1d95' : '#1e1b4b'));
+            if (en.type === 'ranged') { 
+                ctx.beginPath(); ctx.moveTo(en.x, en.y - 20); ctx.lineTo(en.x + 16, en.y); ctx.lineTo(en.x, en.y + 20); ctx.lineTo(en.x - 16, en.y); ctx.closePath(); ctx.fill(); 
+            } else { 
+                ctx.fillRect(en.x - 16, en.y - 16, 32, 32); 
+            }
+            ctx.strokeStyle = '#312e81'; ctx.lineWidth = 2; 
+            if (en.type === 'melee') ctx.strokeRect(en.x-16, en.y-16, 32, 32);
+            
+            ctx.fillStyle = '#450a0a'; 
+            ctx.fillRect(en.x-16, en.y-28, 32, 4); 
+            ctx.fillStyle = '#ef4444'; 
+            ctx.fillRect(en.x-16, en.y-28, (en.hp/en.maxHp)*32, 4);
+        });
+        
+        state.particles.forEach(p => { 
+            ctx.fillStyle = p.color; 
+            ctx.globalAlpha = p.life / 50; 
+            ctx.fillRect(p.x, p.y, 4, 4); 
+        });
+        
+        ctx.globalAlpha = 1; 
+        ctx.save(); 
+        ctx.translate(state.player.x, state.player.y);
+        
+        if (state.player.invuln > 0 && Math.floor(Date.now()/50)%2===0) ctx.globalAlpha = 0.3;
+        
+        ctx.fillStyle = state.player.buff === 'granite' ? '#451a03' : '#fff'; 
+        ctx.fillRect(-12, -20, 24, 40);
+        
+        ctx.fillStyle = state.player.buff === 'granite' ? '#271206' : '#334155'; 
+        ctx.fillRect(-15, -25, 30, 10);
+        
+        ctx.restore(); ctx.restore();
+    }
+
+    function loop() { if (!state.active) return; update(); draw(); requestAnimationFrame(loop); }
+    function updateHPUI() { const c = document.getElementById('hp-container'); if (!c) return; c.innerHTML = ''; for(let i=0; i<state.player.maxHp; i++) { c.innerHTML += `<div class="hp-unit ${i < state.player.hp ? '' : 'empty'}"></div>`; } }
+    function gameOver() { state.active = false; document.getElementById('game-over').classList.remove('hidden'); }
+</script>
+</body>
+</html>
